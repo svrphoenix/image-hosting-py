@@ -1,0 +1,11 @@
+services:
+  backend:
+    build:
+      context: backend
+      dockerfile: ./Dockerfile.dev
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./backend:/app
+      - images:/images
+    command: watchmedo auto-restart --directory=. --pattern="*.py" --recursive -- python app.py
