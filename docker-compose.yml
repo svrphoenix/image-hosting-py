@@ -5,8 +5,8 @@ services:
     env_file:
       - .env
     volumes:
-      - images:/images
-      - logs:/logs
+      - ./images:/images
+      - ./logs:/logs
     restart: always
     depends_on:
       - postgres
@@ -21,7 +21,7 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro # read only
       - ./frontend:/usr/share/nginx/html:ro
-      - images:/var/www/images:ro
+      - ./images:/var/www/images:ro
     restart: always
   
   postgres:
@@ -43,5 +43,5 @@ services:
 
 volumes:
   postgres_data:
-  images:
-  logs:
+#  images:
+#  logs:
