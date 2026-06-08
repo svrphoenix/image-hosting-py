@@ -22,9 +22,10 @@ from utils import (
 IMAGES_DIR = settings.images_dir
 
 class ImageAPIServer(BaseHandler):
-    def __init__(self, *args, **kwargs):
-        self.repo = ImageRepository()
-        super().__init__(*args, **kwargs)
+    def setup(self):
+        super().setup()
+        pool = self.server.db_pool
+        self.repo = ImageRepository(pool)
 
     def _get_routes(self):
         return [
