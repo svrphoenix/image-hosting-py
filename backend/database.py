@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from typing import List, Dict
 
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -33,13 +34,33 @@ class ImageRepository:
             cur.execute(
                 """
                 SELECT count(*) AS total
-                FROM images
+                FROM images;
                 """)
             result = cur.fetchone()
             return result["total"] if result else 0
 
+    def total_size(self) -> int:
+        with self._cursor(dict_rows=True) as cur:
+            cur.execute(
+                """
+                SELECT sum(size) AS total_size
+                FROM images;
+                """)
+            result = cur.fetchone()
+            return result["total_size"] if result else 0
 
-    def list(self, page: int = 1, limit: int = 10, direction: str = "desc") -> list[dict]:
+    def count_types(self) -> List[Dict]:
+        with self._cursor(dict_rows=True) as cur:
+            cur.execute(
+                """
+                SELECT file_type, count(*)
+                FROM images
+                GROUP BY file_type;
+                """)
+
+            return cur.fetchall()
+
+    def list(self, page: int = 1, limit: int = 10, direction: str = "desc") -> List[Dict]:
         with self._cursor(dict_rows=True) as cur:
             offset = (page - 1) * limit
             direction = "DESC" if direction.lower() == "desc" else "ASC"
@@ -51,6 +72,16 @@ class ImageRepository:
                 ORDER BY upload_time {direction}
                 LIMIT %s OFFSET %s""",
                 (limit, offset)
+            )
+            return cur.fetchall()
+
+    def get_popular_images(self, limit: int = 3)-> List[Dict]:
+        with self._cursor(dict_rows=True) as cur:
+            cur.execute("""
+                SELECT id, filename, original_name, views
+                FROM images
+                ORDER BY views DESC 
+                LIMIT %s""", (limit,)
             )
             return cur.fetchall()
 
@@ -66,19 +97,20 @@ class ImageRepository:
             )
             return cur.fetchone()
 
-    def get_by_filename(self, filename: str) -> dict | None:
+    def increment_and_get_by_filename(self, filename: str) -> dict | None:
         with self._cursor(dict_rows=True) as cur:
             cur.execute(
                 """
-                SELECT id, filename, original_name, size, file_type, upload_time
-                FROM images
+                UPDATE images
+                SET views = views + 1
                 WHERE filename = %s
+                    RETURNING id, filename, original_name, size, file_type, upload_time, views
                 """,
                 (filename,),
             )
             return cur.fetchone()
 
-    def delete_by_id(self, image_id: int) -> None:
+    def delete_by_id(self, image_id: int) -> bool:
         with self._cursor(dict_rows=True) as cur:
             cur.execute(
                 """
@@ -96,3 +128,10 @@ class ImageRepository:
                 (filename,),
             )
             return cur.fetchone() is not None
+
+    def image_stats(self, filename: str) -> dict | None:
+        with self._cursor(dict_rows=True) as cur:
+            cur.execute(
+                "SELECT views, upload_time, size FROM images WHERE filename=%s", (filename,),
+            )
+            return cur.fetchone()

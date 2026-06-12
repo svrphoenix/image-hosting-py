@@ -27,12 +27,25 @@ class ImageAPIServer(BaseHandler):
         pool = self.server.db_pool
         self.repo = ImageRepository(pool)
 
+    # def _get_routes(self):
+    #     return [
+    #         ("GET", r"^/images/?$", self.handle_images),
+    #         ("GET", r"^/images/(?P<filename>[^/]+)$", self.handle_image_detail),
+    #         ("GET", r"^/images/popular/?$", self.handle_popular_images),
+    #         ("GET", r"^/stats/?$", self.handle_stats),
+    #         ("GET", r"^/images/(?P<filename>[^/]+)/stats/?$", self.handle_image_stats),
+    #         ("POST", r"^/upload/?$", self.handle_upload),
+    #         ("DELETE", r"^/images/(?P<filename>[^/]+)$", self.handle_delete)
+    #     ]
     def _get_routes(self):
         return [
             ("GET", r"^/images/?$", self.handle_images),
-            ("GET", r"^/images/(?P<filename>[^/]+)$", self.handle_image_detail),
+            ("GET", r"^/images/popular/?$", self.handle_popular_images),
+            ("GET", r"^/images/(?P<filename>[^/]+)/?$", self.handle_image_detail),
+            ("GET", r"^/stats/?$", self.handle_stats),
+            ("GET", r"^/images/(?P<filename>[^/]+)/stats/?$", self.handle_image_stats),
             ("POST", r"^/upload/?$", self.handle_upload),
-            ("DELETE", r"^/images/(?P<filename>[^/]+)$", self.handle_delete)
+            ("DELETE", r"^/images/(?P<filename>[^/]+)/?$", self.handle_delete)
         ]
 
     def _dispatch(self, http_method: str):
@@ -93,7 +106,7 @@ class ImageAPIServer(BaseHandler):
         self._send_json(200, response_data)
 
     def handle_image_detail(self, filename: str):
-        image = self.repo.get_by_filename(filename)
+        image = self.repo.increment_and_get_by_filename(filename)
 
         if not image:
             logger.error(f"Image {filename} not found.")
@@ -195,3 +208,30 @@ class ImageAPIServer(BaseHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
+    def handle_stats(self):
+        total_images = self.repo.count()
+        total_size = self.repo.total_size()
+        types_count = self.repo.count_types()
+
+        response_data = {
+            "total_images": total_images,
+            "total_size": total_size,
+            "types_count": types_count
+        }
+
+        self._send_json(200, response_data)
+
+    def handle_image_stats(self, filename: str):
+        image_stats = self.repo.image_stats(filename)
+        if not image_stats:
+            logger.error(f"Image {filename} not found.")
+            self._send_error(404, "Image not found")
+            return
+
+        self._send_json(200, image_stats)
+
+    def handle_popular_images(self):
+        params = get_query_params(self.path)
+        limit = get_int_param(params, 'limit', default=3)
+        top_images = self.repo.get_popular_images(limit)
+        self._send_json(200, top_images)
