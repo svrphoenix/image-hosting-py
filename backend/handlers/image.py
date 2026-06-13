@@ -18,26 +18,29 @@ from utils import (
     delete_image,
     get_int_param
 )
+from utils.encoders import extract_image_filters
 
 IMAGES_DIR = settings.images_dir
 
 class ImageAPIServer(BaseHandler):
+    """
+    HTTP Request Handler that routes and processes incoming API requests
+    for image management, uploads, deletions, and metrics tracking.
+    """
     def setup(self):
+        """
+        Prepares the handler environment by binding the repository
+        to the server's shared database connection pool.
+        """
         super().setup()
         pool = self.server.db_pool
         self.repo = ImageRepository(pool)
 
-    # def _get_routes(self):
-    #     return [
-    #         ("GET", r"^/images/?$", self.handle_images),
-    #         ("GET", r"^/images/(?P<filename>[^/]+)$", self.handle_image_detail),
-    #         ("GET", r"^/images/popular/?$", self.handle_popular_images),
-    #         ("GET", r"^/stats/?$", self.handle_stats),
-    #         ("GET", r"^/images/(?P<filename>[^/]+)/stats/?$", self.handle_image_stats),
-    #         ("POST", r"^/upload/?$", self.handle_upload),
-    #         ("DELETE", r"^/images/(?P<filename>[^/]+)$", self.handle_delete)
-    #     ]
     def _get_routes(self):
+        """
+        Defines the centralized routing table containing HTTP methods,
+        regex URL patterns, and their corresponding internal handler methods.
+        """
         return [
             ("GET", r"^/images/?$", self.handle_images),
             ("GET", r"^/images/popular/?$", self.handle_popular_images),
@@ -49,6 +52,10 @@ class ImageAPIServer(BaseHandler):
         ]
 
     def _dispatch(self, http_method: str):
+        """
+        Matches the request path against the routing rules and executes
+        the designated method or returns a 404 error if no pattern matches.
+        """
         logger.debug(f"Received {http_method} request for {self.path}")
         path = urlparse(self.path).path
 
@@ -72,6 +79,10 @@ class ImageAPIServer(BaseHandler):
         self._dispatch("DELETE")
 
     def get_client_ip(self):
+        """
+        Extracts the client's IP address, accounting for potential reverse proxies
+        by prioritizing the 'X-Real-IP' header wrapper.
+        """
         real_ip = self.headers.get('X-Real-IP')
 
         if real_ip:
@@ -80,20 +91,22 @@ class ImageAPIServer(BaseHandler):
         return self.client_address[0]
 
     def handle_images(self):
+        """
+        Retrieves a filtered, paginated list of images along with total page data
+        and serializes it into a JSON response.
+        """
         params = get_query_params(self.path)
         page = get_int_param(params, 'page', default=1)
         limit = get_int_param(params, 'limit', default=8)
         sort_order = params.get('order', 'desc')
 
-        images = self.repo.list(
-            page=page,
-            limit=limit,
-            direction=sort_order
-        )
+        filters = extract_image_filters(params)
 
-        total_items = self.repo.count()
+        images = self.repo.search_images(filters, page, limit, sort_order)
+        total_items = self.repo.count_filtered(filters)
         total_pages = math.ceil(total_items / limit) if total_items > 0 else 1
-        response_data = {
+
+        self._send_json(200, {
             "items": images,
             "pagination": {
                 "total": total_items,
@@ -101,11 +114,13 @@ class ImageAPIServer(BaseHandler):
                 "current_page": page,
                 "limit": limit
             }
-        }
-
-        self._send_json(200, response_data)
+        })
 
     def handle_image_detail(self, filename: str):
+        """
+        Fetches comprehensive data for a single image, triggering an atomic
+        increment of its views counter on success.
+        """
         image = self.repo.increment_and_get_by_filename(filename)
 
         if not image:
@@ -116,6 +131,10 @@ class ImageAPIServer(BaseHandler):
         self._send_json(200, image)
 
     def handle_upload(self):
+        """
+        Validates multipart form payloads, checks file headers/signatures using PIL,
+        enforces max size ceilings, dumps the image payload to disk, and indexes it in the DB.
+        """
         client_ip = self.get_client_ip()
         content_type = self.headers.get("Content-Type", "")
         if "multipart/form-data" not in content_type:
@@ -189,6 +208,10 @@ class ImageAPIServer(BaseHandler):
             self._send_error(400, f"Error: {err}")
 
     def handle_delete(self, filename: str):
+        """
+        Removes an image entry from the database and permanently deletes
+        the associated binary file from storage.
+        """
         client_ip = self.get_client_ip()
         # delete in DB
         deleted = self.repo.delete_by_filename(filename)
@@ -209,9 +232,13 @@ class ImageAPIServer(BaseHandler):
         self.end_headers()
 
     def handle_stats(self):
-        total_images = self.repo.count()
-        total_size = self.repo.total_size()
-        types_count = self.repo.count_types()
+        """
+        Compiles and serves generalized dashboard statistics including total file count,
+        aggregate storage payload weight, and distribution types.
+        """
+        total_images = self.repo.get_total_count()
+        total_size = self.repo.get_total_size()
+        types_count = self.repo.get_count_types()
 
         response_data = {
             "total_images": total_images,
@@ -222,6 +249,9 @@ class ImageAPIServer(BaseHandler):
         self._send_json(200, response_data)
 
     def handle_image_stats(self, filename: str):
+        """
+        Returns standalone usage and storage analytics for a designated isolated file resource.
+        """
         image_stats = self.repo.image_stats(filename)
         if not image_stats:
             logger.error(f"Image {filename} not found.")
@@ -231,6 +261,9 @@ class ImageAPIServer(BaseHandler):
         self._send_json(200, image_stats)
 
     def handle_popular_images(self):
+        """
+        Serves an array containing metadata profiles for the most-visited image records.
+        """
         params = get_query_params(self.path)
         limit = get_int_param(params, 'limit', default=3)
         top_images = self.repo.get_popular_images(limit)
