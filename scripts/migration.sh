@@ -1,41 +1,53 @@
 #!/usr/bin/env bash
 
+# This script manages database migrations for the PostgreSQL database.
+# It applies SQL migration files located in the './db/migrations' directory
+# to the 'postgres' Docker container. It keeps track of applied migrations
+# in a 'migration_history' table within the database.
+
 ENV_FILE=".env"
 MIGRATIONS_DIR="./db/migrations"
-CONTAINER_NAME="postgres"
+CONTAINER_NAME="postgres" # Name of the PostgreSQL service container
 
+# Check if .env file exists
 if [ ! -f "$ENV_FILE" ]; then
     echo "Error: File $ENV_FILE not found!"
     exit 1
 fi
 
+# Function to get environment variables from the .env file
 get_env_var() {
     local var_name=$1
     grep -E "^${var_name}=" "$ENV_FILE" | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
 }
 
+# Get database user and name from .env
 DB_USER=$(get_env_var "DB_USER")
 [ -z "$DB_USER" ] && DB_USER=$(get_env_var "POSTGRES_USER")
 
 DB_NAME=$(get_env_var "DB_NAME")
 [ -z "$DB_NAME" ] && DB_NAME=$(get_env_var "POSTGRES_DB")
 
+# Validate DB_USER and DB_NAME
 if [ -z "$DB_USER" ] || [ -z "$DB_NAME" ]; then
     echo "Error: Could not find DB_USER or DB_NAME in $ENV_FILE"
     exit 1
 fi
 
+# Check if the PostgreSQL container is running
 if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     echo "Error: Container '${CONTAINER_NAME}' is not running!"
     exit 1
 fi
 
+# Check if the migrations directory exists
 if [ ! -d "$MIGRATIONS_DIR" ]; then
     echo "Error: Directory $MIGRATIONS_DIR does not exist!"
     exit 1
 fi
 
 echo "Checking migration history table..."
+# Create migration_history table if it doesn't exist
 docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" -c "
 CREATE TABLE IF NOT EXISTS migration_history (
     id SERIAL PRIMARY KEY,
@@ -50,11 +62,13 @@ fi
 
 success_count=0
 
+# Iterate through SQL migration files in sorted order
 for file in $(ls "$MIGRATIONS_DIR"/*.sql 2>/dev/null | sort); do
-    [ -e "$file" ] || continue
+    [ -e "$file" ] || continue # Skip if file does not exist (e.g., if glob returns nothing)
 
     filename=$(basename "$file")
 
+    # Check if migration has already been applied
     is_applied=$(docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" -t -A -c \
         "SELECT 1 FROM migration_history WHERE migration_name='$filename';")
 
@@ -62,6 +76,7 @@ for file in $(ls "$MIGRATIONS_DIR"/*.sql 2>/dev/null | sort); do
         echo "Skipping: $filename (already applied)"
     else
         echo "Applying migration: $filename ..."
+        # Apply migration and record it in migration_history
         (cat "$file"; echo "INSERT INTO migration_history (migration_name) VALUES ('$filename');") | \
         docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" --set ON_ERROR_STOP=1 > /dev/null
 
