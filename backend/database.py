@@ -4,6 +4,8 @@ from typing import List, Dict
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from logger import logger
+
 
 class ImageRepository:
     """
@@ -22,11 +24,16 @@ class ImageRepository:
         """
         A context manager that yields a database cursor.
         Optionally configures the cursor to return rows as dictionaries.
+        Automatically logs any unexpected database errors.
         """
-        with self.pool.connection() as conn:
-            kwargs = {"row_factory": dict_row} if dict_rows else {}
-            with conn.cursor(**kwargs) as cur:
-                yield cur
+        try:
+            with self.pool.connection() as conn:
+                kwargs = {"row_factory": dict_row} if dict_rows else {}
+                with conn.cursor(**kwargs) as cur:
+                    yield cur
+        except Exception as err:
+            logger.error(f"Database transaction failed: {err}", exc_info=True)
+            raise
 
     def _build_filter_clauses(self, filters: dict) -> tuple[str, list]:
         """
@@ -65,7 +72,7 @@ class ImageRepository:
                 """
                 INSERT INTO images (filename, original_name, size, file_type)
                 VALUES (%s, %s, %s, %s)
-                RETURNING id
+                RETURNING id;
                 """,
                 (filename, original_name, size, file_type),
             )
@@ -125,10 +132,11 @@ class ImageRepository:
             FROM images
             {where_str}
             ORDER BY upload_time {direction}
-            LIMIT %s OFFSET %s
+            LIMIT %s OFFSET %s;
         """
 
         query_params = params + [limit, offset]
+        logger.debug(f"Executing search_images. SQL: {query.strip()} | Params: {query_params}")
 
         with self._cursor(dict_rows=True) as cur:
             cur.execute(query, tuple(query_params))
@@ -140,7 +148,8 @@ class ImageRepository:
         Essential for generating accurate pagination controls on the frontend.
         """
         where_str, params = self._build_filter_clauses(filters)
-        query = f"SELECT COUNT(*) AS total FROM images {where_str}"
+        query = f"SELECT COUNT(*) AS total FROM images {where_str};"
+        logger.debug(f"Executing count_filtered. SQL: {query.strip()} | Params: {params}")
 
         with self._cursor(dict_rows=True) as cur:
             cur.execute(query, tuple(params))
@@ -156,7 +165,7 @@ class ImageRepository:
                 SELECT id, filename, original_name, views
                 FROM images
                 ORDER BY views DESC 
-                LIMIT %s""", (limit,)
+                LIMIT %s;""", (limit,)
             )
             return cur.fetchall()
 
@@ -169,7 +178,7 @@ class ImageRepository:
                 """
                 SELECT id, filename, original_name, size, file_type, upload_time
                 FROM images
-                WHERE id = %s
+                WHERE id = %s;
                 """,
                 (image_id,),
             )
@@ -186,7 +195,7 @@ class ImageRepository:
                 UPDATE images
                 SET views = views + 1
                 WHERE filename = %s
-                    RETURNING id, filename, original_name, size, file_type, upload_time, views
+                    RETURNING id, filename, original_name, size, file_type, upload_time, views;
                 """,
                 (filename,),
             )
@@ -202,7 +211,7 @@ class ImageRepository:
                 DELETE
                 FROM images
                 WHERE id = %s
-                RETURNING id""", (image_id,),
+                RETURNING id;""", (image_id,),
             )
             return cur.fetchone() is not None
 
@@ -212,7 +221,7 @@ class ImageRepository:
         """
         with self._cursor() as cur:
             cur.execute(
-                "DELETE FROM images WHERE filename = %s RETURNING id",
+                "DELETE FROM images WHERE filename = %s RETURNING id;",
                 (filename,),
             )
             return cur.fetchone() is not None
@@ -223,7 +232,19 @@ class ImageRepository:
         """
         with self._cursor(dict_rows=True) as cur:
             cur.execute(
-                "SELECT views, upload_time, size FROM images WHERE filename=%s", (filename,),
+                "SELECT views, upload_time, size FROM images WHERE filename=%s;", (filename,),
             )
             return cur.fetchone()
 
+    def ping(self) -> bool:
+        """
+        Pings the database to verify that the connection pool is healthy and active.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            with self._cursor() as cur:
+                cur.execute("SELECT 1;")
+                return True
+        except Exception as err:
+            logger.error(f"Database ping failed: {err}")
+            return False

@@ -16,9 +16,9 @@ from utils import (
     validate_extension,
     save_image,
     delete_image,
-    get_int_param
+    get_int_param,
+    extract_image_filters
 )
-from utils.encoders import extract_image_filters
 
 IMAGES_DIR = settings.images_dir
 
@@ -42,6 +42,7 @@ class ImageAPIServer(BaseHandler):
         regex URL patterns, and their corresponding internal handler methods.
         """
         return [
+            ("GET", r"^/health(check)?/?$", self.handle_health),
             ("GET", r"^/images/?$", self.handle_images),
             ("GET", r"^/images/popular/?$", self.handle_popular_images),
             ("GET", r"^/images/(?P<filename>[^/]+)/?$", self.handle_image_detail),
@@ -268,3 +269,22 @@ class ImageAPIServer(BaseHandler):
         limit = get_int_param(params, 'limit', default=3)
         top_images = self.repo.get_popular_images(limit)
         self._send_json(200, top_images)
+
+    def handle_health(self):
+        """
+        Performs a system health check by verifying database connectivity.
+        Returns HTTP 200 if healthy, or HTTP 500 if the database is unreachable.
+        """
+        db_alive = self.repo.ping()
+
+        if db_alive:
+            self._send_json(200, {
+                "status": "healthy",
+                "database": "connected"
+            })
+        else:
+            logger.critical("Health check failed: Database is unreachable.")
+            self._send_json(500, {
+                "status": "unhealthy",
+                "database": "disconnected"
+            })
