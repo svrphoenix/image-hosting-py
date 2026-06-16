@@ -25,7 +25,7 @@ IMAGES_DIR = settings.images_dir
 class ImageAPIServer(BaseHandler):
     """
     HTTP Request Handler that routes and processes incoming API requests
-    for image management, uploads, deletions, and metrics tracking.
+    for image management, uploads, soft-deletions, trash configurations and metrics tracking.
     """
     def setup(self):
         """
@@ -49,7 +49,10 @@ class ImageAPIServer(BaseHandler):
             ("GET", r"^/stats/?$", self.handle_stats),
             ("GET", r"^/images/(?P<filename>[^/]+)/stats/?$", self.handle_image_stats),
             ("POST", r"^/upload/?$", self.handle_upload),
-            ("DELETE", r"^/images/(?P<filename>[^/]+)/?$", self.handle_delete)
+            ("DELETE", r"^/images/(?P<filename>[^/]+)/?$", self.handle_delete),
+            ("GET", r"^/trash/?$", self.handle_get_trash),
+            ("POST", r"^/images/(?P<filename>[^/]+)/restore/?$", self.handle_restore),
+            ("DELETE", r"^/trash/?$", self.handle_purge_trash)
         ]
 
     def _dispatch(self, http_method: str):
@@ -90,6 +93,25 @@ class ImageAPIServer(BaseHandler):
             return real_ip.strip()
         
         return self.client_address[0]
+
+    def handle_health(self):
+        """
+        Performs a system health check by verifying database connectivity.
+        Returns HTTP 200 if healthy, or HTTP 500 if the database is unreachable.
+        """
+        db_alive = self.repo.ping()
+
+        if db_alive:
+            self._send_json(200, {
+                "status": "healthy",
+                "database": "connected"
+            })
+        else:
+            logger.critical("Health check failed: Database is unreachable.")
+            self._send_json(500, {
+                "status": "unhealthy",
+                "database": "disconnected"
+            })
 
     def handle_images(self):
         """
@@ -210,27 +232,90 @@ class ImageAPIServer(BaseHandler):
 
     def handle_delete(self, filename: str):
         """
-        Removes an image entry from the database and permanently deletes
-        the associated binary file from storage.
+        Performs a soft delete on an image, moving it to the trash bin
+        by updating the database record. No physical file is removed at this stage.
+        """
+
+        client_ip = self.get_client_ip()
+        moved_to_trash = self.repo.soft_delete(filename)
+        if not moved_to_trash:
+            logger.error(f"Attempt to soft-delete non-existing or already deleted image ({filename}).")
+            self._send_error(404, "Image not found or already in trash")
+            return
+
+        logger.info(f"Image {filename} moved to trash from IP {client_ip}.")
+        self.send_response(204)
+        self.end_headers()
+
+    def handle_get_trash(self):
+        """
+        Retrieves a paginated list of soft-deleted images currently sitting in the trash.
+        """
+        params = get_query_params(self.path)
+        page = get_int_param(params, 'page', default=1)
+        limit = get_int_param(params, 'limit', default=8)
+
+        images = self.repo.get_deleted(page, limit)
+        total_items = self.repo.count_deleted()
+        total_pages = math.ceil(total_items / limit) if total_items > 0 else 1
+
+        self._send_json(200, {
+            "items": images,
+            "pagination": {
+                "total": total_items,
+                "pages": total_pages,
+                "current_page": page,
+                "limit": limit
+            }
+        })
+
+    def handle_restore(self, filename: str):
+        """
+        Restores a soft-deleted image from the trash bin, making it active again.
         """
         client_ip = self.get_client_ip()
-        # delete in DB
-        deleted = self.repo.delete_by_filename(filename)
-        if not deleted:
-            logger.error(f"Attempt to delete non-existing image ({filename}).")
-            self._send_error(404, "Image not found in database")
+        restored = self.repo.restore(filename)
+
+        if not restored:
+            logger.error(f"Attempt to restore image ({filename}) that is not in trash.")
+            self._send_error(404, "Image not found in trash")
             return
 
-        # delete in filesystem
-        if not delete_image(filename):
-            logger.error(f"Failed to delete file {filename} from storage.")
-            self._send_error(500, "Internal server error: failed to delete file in storage")
+        logger.info(f"Image {filename} successfully restored from trash by IP {client_ip}.")
+        self._send_json(200, {"status": "success", "message": f"Image '{filename}' restored successfully."})
+
+    def handle_purge_trash(self):
+        """
+        Permanently purges all images from the trash bin, erasing database records
+        and physically deleting files from disk storage.
+        """
+        client_ip = self.get_client_ip()
+        purged_filenames = self.repo.purge_deleted()
+
+        if not purged_filenames:
+            logger.info(f"Purge trash requested by IP {client_ip}, but trash is already empty.")
+            self.send_response(204)
+            self.end_headers()
             return
 
-        logger.info(f"Image {filename} deleted from IP {client_ip}.")
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
+        failed_files = []
+        for filename in purged_filenames:
+            if not delete_image(filename):
+                logger.error(f"Failed to physically delete file {filename} during trash purge.")
+                failed_files.append(filename)
+
+        logger.info(
+            f"Trash fully purged by IP {client_ip}. Permanently deleted {len(purged_filenames) - len(failed_files)} files.")
+
+        if failed_files:
+            self._send_json(207, {
+                "status": "partial_success",
+                "message": "Database records purged, but some files could not be deleted from storage.",
+                "failed_files": failed_files
+            })
+        else:
+            self.send_response(204)
+            self.end_headers()
 
     def handle_stats(self):
         """
@@ -270,21 +355,3 @@ class ImageAPIServer(BaseHandler):
         top_images = self.repo.get_popular_images(limit)
         self._send_json(200, top_images)
 
-    def handle_health(self):
-        """
-        Performs a system health check by verifying database connectivity.
-        Returns HTTP 200 if healthy, or HTTP 500 if the database is unreachable.
-        """
-        db_alive = self.repo.ping()
-
-        if db_alive:
-            self._send_json(200, {
-                "status": "healthy",
-                "database": "connected"
-            })
-        else:
-            logger.critical("Health check failed: Database is unreachable.")
-            self._send_json(500, {
-                "status": "unhealthy",
-                "database": "disconnected"
-            })

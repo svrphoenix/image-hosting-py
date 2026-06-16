@@ -10,7 +10,7 @@ from logger import logger
 class ImageRepository:
     """
     Repository class responsible for executing database operations related to images,
-    including CRUD actions, statistical aggregations, and advanced filtering.
+    including CRUD actions, statistical aggregations, advanced filtering, and soft-delete features.
     """
 
     def __init__(self, pool: ConnectionPool):
@@ -39,8 +39,9 @@ class ImageRepository:
         """
         Dynamically constructs SQL WHERE clauses and arguments based on the provided filters.
         Handles full-text search, file extensions, and ISO date ranges.
+        Enforces exclusion of soft-deleted records by default.
         """
-        where_clauses = []
+        where_clauses = ["deleted_at IS NULL"]
         params = []
 
         if filters.get("search"):
@@ -81,13 +82,14 @@ class ImageRepository:
 
     def get_total_count(self) -> int:
         """
-        Retrieves the global count of all images stored in the database.
+        Retrieves the global count of active (non-deleted) images stored in the database.
         """
         with self._cursor(dict_rows=True) as cur:
             cur.execute(
                 """
                 SELECT count(*) AS total
-                FROM images;
+                FROM images
+                WHERE deleted_at IS NULL;
                 """)
             result = cur.fetchone()
             return result["total"] if result else 0
@@ -100,7 +102,8 @@ class ImageRepository:
             cur.execute(
                 """
                 SELECT sum(size) AS total_size
-                FROM images;
+                FROM images
+                WHERE deleted_at IS NULL;
                 """)
             result = cur.fetchone()
             return result["total_size"] if result else 0
@@ -114,6 +117,7 @@ class ImageRepository:
                 """
                 SELECT file_type, count(*)
                 FROM images
+                WHERE deleted_at IS NULL
                 GROUP BY file_type;
                 """)
 
@@ -164,6 +168,7 @@ class ImageRepository:
             cur.execute("""
                 SELECT id, filename, original_name, views
                 FROM images
+                WHERE deleted_at IS NULL
                 ORDER BY views DESC 
                 LIMIT %s;""", (limit,)
             )
@@ -178,7 +183,7 @@ class ImageRepository:
                 """
                 SELECT id, filename, original_name, size, file_type, upload_time
                 FROM images
-                WHERE id = %s;
+                WHERE id = %s AND deleted_at IS NULL;
                 """,
                 (image_id,),
             )
@@ -194,37 +199,37 @@ class ImageRepository:
                 """
                 UPDATE images
                 SET views = views + 1
-                WHERE filename = %s
+                WHERE filename = %s AND deleted_at IS NULL
                     RETURNING id, filename, original_name, size, file_type, upload_time, views;
                 """,
                 (filename,),
             )
             return cur.fetchone()
 
-    def delete_by_id(self, image_id: int) -> bool:
-        """
-        Deletes an image metadata record using its unique ID. Returns True if successful.
-        """
-        with self._cursor(dict_rows=True) as cur:
-            cur.execute(
-                """
-                DELETE
-                FROM images
-                WHERE id = %s
-                RETURNING id;""", (image_id,),
-            )
-            return cur.fetchone() is not None
-
-    def delete_by_filename(self, filename: str) -> bool:
-        """
-        Deletes an image metadata record using its unique filename. Returns True if successful.
-        """
-        with self._cursor() as cur:
-            cur.execute(
-                "DELETE FROM images WHERE filename = %s RETURNING id;",
-                (filename,),
-            )
-            return cur.fetchone() is not None
+    # def delete_by_id(self, image_id: int) -> bool:
+    #     """
+    #     Deletes an image metadata record using its unique ID. Returns True if successful.
+    #     """
+    #     with self._cursor(dict_rows=True) as cur:
+    #         cur.execute(
+    #             """
+    #             DELETE
+    #             FROM images
+    #             WHERE id = %s AND deleted_at IS NULL
+    #             RETURNING id;""", (image_id,),
+    #         )
+    #         return cur.fetchone() is not None
+    #
+    # def delete_by_filename(self, filename: str) -> bool:
+    #     """
+    #     Deletes an image metadata record using its unique filename. Returns True if successful.
+    #     """
+    #     with self._cursor() as cur:
+    #         cur.execute(
+    #             "DELETE FROM images WHERE filename = %s RETURNING id;",
+    #             (filename,),
+    #         )
+    #         return cur.fetchone() is not None
 
     def image_stats(self, filename: str) -> dict | None:
         """
@@ -232,7 +237,10 @@ class ImageRepository:
         """
         with self._cursor(dict_rows=True) as cur:
             cur.execute(
-                "SELECT views, upload_time, size FROM images WHERE filename=%s;", (filename,),
+                """
+                SELECT views, upload_time, size 
+                FROM images 
+                WHERE filename=%s AND deleted_at IS NULL;""", (filename,),
             )
             return cur.fetchone()
 
@@ -248,3 +256,80 @@ class ImageRepository:
         except Exception as err:
             logger.error(f"Database ping failed: {err}")
             return False
+
+    def soft_delete(self, filename: str) -> bool:
+        """
+        Soft deletes an image by setting its deleted_at timestamp to the current time.
+        Returns True if the image was successfully moved to trash.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                UPDATE images
+                SET deleted_at = NOW()
+                WHERE filename = %s
+                  AND deleted_at IS NULL RETURNING id;
+                """,
+                (filename,),
+            )
+            return cur.fetchone() is not None
+
+    def get_deleted(self, page: int = 1, limit: int = 10) -> List[Dict]:
+        """
+        Retrieves a paginated list of soft-deleted images from the trash, sorted by deletion time.
+        """
+        offset = (page - 1) * limit
+        with self._cursor(dict_rows=True) as cur:
+            cur.execute(
+                """
+                SELECT id, filename, original_name, size, file_type, upload_time, deleted_at
+                FROM images
+                WHERE deleted_at IS NOT NULL
+                ORDER BY deleted_at DESC
+                    LIMIT %s
+                OFFSET %s;
+                """,
+                (limit, offset),
+            )
+            return cur.fetchall()
+
+    def count_deleted(self) -> int:
+        """
+        Calculates the total number of soft-deleted images currently sitting in the trash.
+        """
+        with self._cursor(dict_rows=True) as cur:
+            cur.execute("SELECT COUNT(*) AS total FROM images WHERE deleted_at IS NOT NULL;")
+            result = cur.fetchone()
+            return result["total"] if result else 0
+
+    def restore(self, filename: str) -> bool:
+        """
+        Restores a soft-deleted image by clearing its deleted_at timestamp.
+        Returns True if successful.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                UPDATE images
+                SET deleted_at = NULL
+                WHERE filename = %s
+                  AND deleted_at IS NOT NULL RETURNING id;
+                """,
+                (filename,),
+            )
+            return cur.fetchone() is not None
+
+    def purge_deleted(self) -> List[str]:
+        """
+        Permanently removes all soft-deleted records from the database.
+        Returns a list of filenames to be physically deleted from disk storage.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                DELETE
+                FROM images
+                WHERE deleted_at IS NOT NULL RETURNING filename;
+                """
+            )
+            return [row[0] for row in cur.fetchall()]
