@@ -14,11 +14,16 @@
     const API_UPLOAD_URL = `${BASE_API_URL}/upload`;
     const API_IMAGES_URL = `${BASE_API_URL}/images/`;
     const API_DELETE_URL = (fn) => `${BASE_API_URL}/images/${encodeURIComponent(fn)}`;
+    const API_RESTORE_URL = (fn) => `${BASE_API_URL}/images/${encodeURIComponent(fn)}/restore`;
+    const API_STATS_URL = `${BASE_API_URL}/stats/`;
+    const API_POPULAR_URL = `${BASE_API_URL}/images/popular/`;
+    const API_TRASH_URL = `${BASE_API_URL}/trash/`;
 
     const LS_KEYS = {
         LIMIT: 'image_host_limit',
         ACTIVE_TAB: 'image_host_active_tab',
-        SORT_ORDER: 'image_host_sort_order'
+        SORT_ORDER: 'image_host_sort_order',
+        FILTERS: 'image_host_filters'
     };
 
     const DEFAULT_PAGE = 1;
@@ -26,7 +31,7 @@
     const AVAILABLE_LIMITS = [4, 8, 12];
     const DEFAULT_TAB = 'upload';
     const DEFAULT_SORT_ORDER = 'desc';
-    const VALID_TABS = ['upload', 'images'];
+    const VALID_TABS = ['upload', 'images', 'stats', 'trash'];
     const VALID_SORT_ORDERS = ['desc', 'asc'];
 
     const SEL = {
@@ -48,13 +53,34 @@
         currentPageSpan: '#currentPage',
         totalPagesSpan: '#totalPages',
         limitSelect: '#limitSelect',
-        sortSelect: '#sortSelect'
+        sortSelect: '#sortSelect',
+        searchInput: '#searchInput',
+        typeSelect: '#typeSelect',
+        dateFromInput: '#dateFromInput',
+        dateToInput: '#dateToInput',
+        clearFiltersBtn: '#clearFiltersBtn',
+        statsTab: '#stats-tab',
+        totalImages: '#totalImages',
+        totalSize: '#totalSize',
+        fileTypesCount: '#fileTypesCount',
+        typeList: '#typeList',
+        popularList: '#popularList',
+        trashTab: '#trash-tab',
+        trashGallery: '#trashGallery',
+        trashSummary: '#trashSummary',
+        purgeTrashBtn: '#purgeTrashBtn',
+        trashPrevPageBtn: '#trashPrevPage',
+        trashNextPageBtn: '#trashNextPage',
+        trashCurrentPageSpan: '#trashCurrentPage',
+        trashTotalPagesSpan: '#trashTotalPages'
     };
 
     const $ = (s) => document.querySelector(s);
     const $$ = (s) => document.querySelectorAll(s);
 
     let loadImagesFunction = null;
+    let loadStatsFunction = null;
+    let loadTrashFunction = null;
 
     console.log('[INIT] Script started, location:', location.href);
 
@@ -142,6 +168,13 @@
         url.searchParams.set('page', page.toString());
         url.searchParams.set('limit', limit.toString());
         url.searchParams.set('order', order);
+        Object.entries(filterState).forEach(([key, value]) => {
+            if (value) {
+                url.searchParams.set(key, value);
+            } else {
+                url.searchParams.delete(key);
+            }
+        });
         window.history.replaceState({}, '', url);
     };
 
@@ -154,6 +187,10 @@
         url.searchParams.delete('page');
         url.searchParams.delete('limit');
         url.searchParams.delete('order');
+        url.searchParams.delete('search');
+        url.searchParams.delete('file_type');
+        url.searchParams.delete('date_from');
+        url.searchParams.delete('date_to');
         window.history.replaceState({}, '', url);
     };
 
@@ -166,6 +203,10 @@
         const urlPage = getUrlParam('page');
         const urlLimit = getUrlParam('limit');
         const urlOrder = getUrlParam('order');
+        const urlSearch = getUrlParam('search');
+        const urlType = getUrlParam('file_type');
+        const urlDateFrom = getUrlParam('date_from');
+        const urlDateTo = getUrlParam('date_to');
 
         if (urlPage) {
             const pageNum = parseInt(urlPage);
@@ -187,6 +228,11 @@
             paginationState.sortOrder = urlOrder;
             console.log('[initPaginationFromUrl] Set sortOrder from URL:', urlOrder);
         }
+
+        filterState.search = urlSearch || filterState.search;
+        filterState.file_type = urlType || filterState.file_type;
+        filterState.date_from = urlDateFrom || filterState.date_from;
+        filterState.date_to = urlDateTo || filterState.date_to;
 
         console.log('[initPaginationFromUrl] Final state:', paginationState);
     };
@@ -220,7 +266,77 @@
         sortOrder: getSavedSortOrder()
     };
 
+    const filterState = {
+        search: '',
+        file_type: '',
+        date_from: '',
+        date_to: ''
+    };
+
+    const trashState = {
+        currentPage: DEFAULT_PAGE,
+        limit: DEFAULT_LIMIT,
+        totalPages: 1,
+        totalItems: 0
+    };
+
     console.log('[INIT] Initial pagination state:', paginationState);
+
+    const escapeHtml = (value = '') => String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    const formatFileSize = (bytes = 0) => {
+        if (!bytes) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+    };
+
+    const formatDate = (dateString) => {
+        if (!dateString) return '-';
+        const date = new Date(dateString);
+        if (Number.isNaN(date.getTime())) return dateString;
+        return date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    };
+
+    const buildQueryString = (params) => {
+        const searchParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null && value !== '') {
+                searchParams.set(key, value);
+            }
+        });
+        return searchParams.toString();
+    };
+
+    const loadSavedFilters = () => {
+        try {
+            const saved = JSON.parse(localStorage.getItem(LS_KEYS.FILTERS) || '{}');
+            Object.assign(filterState, {
+                search: saved.search || '',
+                file_type: saved.file_type || '',
+                date_from: saved.date_from || '',
+                date_to: saved.date_to || ''
+            });
+        } catch (e) {
+            console.warn('[loadSavedFilters] Failed to parse saved filters:', e);
+        }
+    };
+
+    const saveFilters = () => {
+        localStorage.setItem(LS_KEYS.FILTERS, JSON.stringify(filterState));
+    };
 
     /**
      * Display status message in upload text area.
@@ -253,7 +369,7 @@
             console.error(`[API] ${method.toUpperCase()} error:`, e);
             const error = {
                 status: e.response?.status ?? null,
-                message: e.response?.data?.detail || e.message || 'Unknown error',
+                message: e.response?.data?.error || e.response?.data?.detail || e.message || 'Unknown error',
             };
 
             if (method.toLowerCase() === 'get' && url.startsWith(API_IMAGES_URL) && error.status === 404) {
@@ -282,6 +398,61 @@
             console.error('[copyToClipboard] Failed to copy to clipboard:', e);
         }
     };
+
+    const openDialog = ({
+        title,
+        message,
+        confirmText = 'OK',
+        cancelText = 'Cancel',
+        variant = 'primary',
+        showCancel = true
+    }) => new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'app-modal-backdrop';
+        modal.innerHTML = `
+            <div class="app-modal" role="dialog" aria-modal="true" aria-labelledby="appModalTitle">
+                <button class="app-modal-close" type="button" aria-label="Close dialog">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="app-modal-icon ${variant}">
+                    <i class="fas ${variant === 'danger' ? 'fa-triangle-exclamation' : 'fa-circle-info'}"></i>
+                </div>
+                <h2 class="app-modal-title" id="appModalTitle">${escapeHtml(title)}</h2>
+                <p class="app-modal-message">${escapeHtml(message)}</p>
+                <div class="app-modal-actions">
+                    ${showCancel ? `<button class="app-modal-btn secondary" type="button" data-action="cancel">${escapeHtml(cancelText)}</button>` : ''}
+                    <button class="app-modal-btn ${variant}" type="button" data-action="confirm">${escapeHtml(confirmText)}</button>
+                </div>
+            </div>
+        `;
+
+        const previousOverflow = document.body.style.overflow;
+        const close = (result) => {
+            document.body.style.overflow = previousOverflow;
+            modal.remove();
+            document.removeEventListener('keydown', onKeyDown);
+            resolve(result);
+        };
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') close(false);
+        };
+
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) close(false);
+            const action = event.target.closest('[data-action]')?.dataset.action;
+            if (action === 'confirm') close(true);
+            if (action === 'cancel') close(false);
+        });
+
+        modal.querySelector('.app-modal-close').addEventListener('click', () => close(false));
+        document.addEventListener('keydown', onKeyDown);
+        document.body.style.overflow = 'hidden';
+        document.body.appendChild(modal);
+        modal.querySelector('[data-action="confirm"]').focus();
+    });
+
+    const confirmDialog = (options) => openDialog({...options, showCancel: true});
+    const messageDialog = (options) => openDialog({...options, showCancel: false});
 
     /**
      * Initialize tabs functionality with localStorage and URL parameter support
@@ -346,6 +517,12 @@
             if (tabId === 'images' && loadImagesFunction) {
                 console.log('[activateTab] Calling loadImagesFunction');
                 loadImagesFunction();
+            } else if (tabId === 'stats' && loadStatsFunction) {
+                console.log('[activateTab] Calling loadStatsFunction');
+                loadStatsFunction();
+            } else if (tabId === 'trash' && loadTrashFunction) {
+                console.log('[activateTab] Calling loadTrashFunction');
+                loadTrashFunction();
             } else if (tabId === 'images') {
                 console.warn('[activateTab] loadImagesFunction not available yet!');
             }
@@ -516,6 +693,11 @@
         const totalPagesSpan = $(SEL.totalPagesSpan);
         const limitSelect = $(SEL.limitSelect);
         const sortSelect = $(SEL.sortSelect);
+        const searchInput = $(SEL.searchInput);
+        const typeSelect = $(SEL.typeSelect);
+        const dateFromInput = $(SEL.dateFromInput);
+        const dateToInput = $(SEL.dateToInput);
+        const clearFiltersBtn = $(SEL.clearFiltersBtn);
 
         console.log('[initImagesTab] Found elements:', {
             imgSection: !!imgSection,
@@ -526,7 +708,12 @@
             currentPageSpan: !!currentPageSpan,
             totalPagesSpan: !!totalPagesSpan,
             limitSelect: !!limitSelect,
-            sortSelect: !!sortSelect
+            sortSelect: !!sortSelect,
+            searchInput: !!searchInput,
+            typeSelect: !!typeSelect,
+            dateFromInput: !!dateFromInput,
+            dateToInput: !!dateToInput,
+            clearFiltersBtn: !!clearFiltersBtn
         });
 
         if (!imgSection || !imgGallery || !imgTabBtn) {
@@ -541,6 +728,18 @@
             console.log('[updateSelectsFromState] Updating selects with state:', paginationState);
             if (limitSelect) limitSelect.value = paginationState.limit.toString();
             if (sortSelect) sortSelect.value = paginationState.sortOrder;
+            if (searchInput) searchInput.value = filterState.search;
+            if (typeSelect) typeSelect.value = filterState.file_type;
+            if (dateFromInput) dateFromInput.value = filterState.date_from;
+            if (dateToInput) dateToInput.value = filterState.date_to;
+        };
+
+        const syncFiltersFromControls = () => {
+            filterState.search = searchInput?.value.trim() || '';
+            filterState.file_type = typeSelect?.value || '';
+            filterState.date_from = dateFromInput?.value || '';
+            filterState.date_to = dateToInput?.value || '';
+            saveFilters();
         };
 
         /**
@@ -570,7 +769,14 @@
         const deleteImage = async (filename, card) => {
             console.log('[deleteImage] Attempting to delete:', filename);
 
-            if (!confirm(`Delete "${filename}"?`)) {
+            const confirmed = await confirmDialog({
+                title: 'Move to Trash',
+                message: `Move "${filename}" to trash? You can restore it later from the Trash tab.`,
+                confirmText: 'Move to Trash',
+                variant: 'danger'
+            });
+
+            if (!confirmed) {
                 console.log('[deleteImage] Delete cancelled by user');
                 return;
             }
@@ -594,14 +800,19 @@
                     loadImages();
                 } else if (!imgGallery.querySelector('.image-card')) {
                     console.log('[deleteImage] No more images, showing empty message');
-                    imgGallery.innerHTML = '<p class="no-images-msg">No images uploaded yet.</p>';
+                    imgGallery.innerHTML = '<p class="no-images-msg">No matching images found.</p>';
                     updatePaginationUI();
                 } else {
                     updatePaginationUI();
                 }
             } catch (e) {
                 console.error('[deleteImage] Delete failed:', e);
-                alert(`Delete failed: ${e.message}`);
+                await messageDialog({
+                    title: 'Delete Failed',
+                    message: e.message,
+                    confirmText: 'Close',
+                    variant: 'danger'
+                });
             }
         };
 
@@ -612,9 +823,12 @@
          */
         const createImageCard = (image) => {
             const filename = image.filename;
-            const originalName = image.original_name
+            const originalName = image.original_name || filename;
             const imageUrl = `${window.location.origin}${image.url || '/images/' + filename}`;
             const detailUrl = `image_detail.html?filename=${encodeURIComponent(filename)}`;
+            const uploaded = image.upload_time ? formatDate(image.upload_time) : '-';
+            const size = image.size ? formatFileSize(image.size) : '-';
+            const views = image.views ?? 0;
 
             console.log('[createImageCard] Creating card for:', filename);
 
@@ -623,12 +837,18 @@
             card.innerHTML = `
                 <div class="image-card-preview">
                     <a href="${detailUrl}">
-                        <img src="${imageUrl}" alt="${originalName}" loading="lazy" />
+                        <img src="${imageUrl}" alt="${escapeHtml(originalName)}" loading="lazy" />
                     </a>
                 </div>
                 <div class="image-card-info">
-                    <h3 class="image-card-title" title="${filename}">${originalName}</h3>
-                    <p class="image-card-url" title="${imageUrl}">${imageUrl}</p>
+                    <h3 class="image-card-title" title="${escapeHtml(filename)}">${escapeHtml(originalName)}</h3>
+                    <p class="image-card-url" title="${escapeHtml(imageUrl)}">${escapeHtml(imageUrl)}</p>
+                    <div class="image-card-meta">
+                        <span><i class="fas fa-eye"></i> ${views}</span>
+                        <span>${escapeHtml(size)}</span>
+                        <span>${escapeHtml((image.file_type || '').toUpperCase())}</span>
+                    </div>
+                    <p class="image-card-date">${escapeHtml(uploaded)}</p>
                     <div class="image-card-actions">
                         <button class="copy-url-btn">Copy URL</button>
                         <button class="card-delete-btn" aria-label="Delete image">
@@ -667,7 +887,13 @@
             updateSelectsFromState();
 
             try {
-                const url = `${API_IMAGES_URL}?page=${paginationState.currentPage}&limit=${paginationState.limit}&order=${paginationState.sortOrder}`;
+                const query = buildQueryString({
+                    page: paginationState.currentPage,
+                    limit: paginationState.limit,
+                    order: paginationState.sortOrder,
+                    ...filterState
+                });
+                const url = `${API_IMAGES_URL}?${query}`;
                 console.log('[loadImages] Making API request to:', url);
 
                 const response = await api('get', url);
@@ -693,7 +919,7 @@
 
                 if (!files || !files.length) {
                     console.log('[loadImages] No files found, showing empty message');
-                    imgGallery.innerHTML = '<p class="no-images-msg">No images uploaded yet.</p>';
+                    imgGallery.innerHTML = '<p class="no-images-msg">No matching images found.</p>';
                     updatePaginationUI();
 
                     if (paginationControls) {
@@ -758,6 +984,39 @@
             console.log('[initImagesTab] sortSelect not found, skipping event listener');
         }
 
+        let searchDebounce = null;
+        const applyFilters = () => {
+            syncFiltersFromControls();
+            paginationState.currentPage = 1;
+            loadImages();
+        };
+
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                clearTimeout(searchDebounce);
+                searchDebounce = setTimeout(applyFilters, 350);
+            });
+        }
+
+        [typeSelect, dateFromInput, dateToInput].forEach((control) => {
+            if (control) {
+                control.addEventListener('change', applyFilters);
+            }
+        });
+
+        if (clearFiltersBtn) {
+            clearFiltersBtn.addEventListener('click', () => {
+                filterState.search = '';
+                filterState.file_type = '';
+                filterState.date_from = '';
+                filterState.date_to = '';
+                saveFilters();
+                updateSelectsFromState();
+                paginationState.currentPage = 1;
+                loadImages();
+            });
+        }
+
         if (prevPageBtn) {
             prevPageBtn.addEventListener('click', () => {
                 console.log('[prevPageBtn] Click event');
@@ -788,13 +1047,244 @@
         console.log('[initImagesTab] Initialization complete');
     }
 
+    function initStatsTab() {
+        const totalImages = $(SEL.totalImages);
+        const totalSize = $(SEL.totalSize);
+        const fileTypesCount = $(SEL.fileTypesCount);
+        const typeList = $(SEL.typeList);
+        const popularList = $(SEL.popularList);
+
+        if (!totalImages || !totalSize || !fileTypesCount || !typeList || !popularList) {
+            console.error('[initStatsTab] Missing required elements');
+            return;
+        }
+
+        const renderTypeList = (types = []) => {
+            if (!types.length) {
+                typeList.innerHTML = '<p class="empty-panel-message">No active images.</p>';
+                return;
+            }
+
+            typeList.innerHTML = types.map((typeItem) => `
+                <div class="type-row">
+                    <span>${escapeHtml((typeItem.file_type || 'unknown').toUpperCase())}</span>
+                    <strong>${typeItem.count}</strong>
+                </div>
+            `).join('');
+        };
+
+        const renderPopular = (images = []) => {
+            if (!images.length) {
+                popularList.innerHTML = '<p class="empty-panel-message">No views recorded yet.</p>';
+                return;
+            }
+
+            popularList.innerHTML = images.map((image) => {
+                const filename = image.filename;
+                const name = image.original_name || filename;
+                const imageUrl = `${window.location.origin}/images/${filename}`;
+                const detailUrl = `image_detail.html?filename=${encodeURIComponent(filename)}`;
+
+                return `
+                    <a class="popular-row" href="${detailUrl}">
+                        <img src="${imageUrl}" alt="${escapeHtml(name)}" loading="lazy"/>
+                        <span>${escapeHtml(name)}</span>
+                        <strong><i class="fas fa-eye"></i> ${image.views ?? 0}</strong>
+                    </a>
+                `;
+            }).join('');
+        };
+
+        const loadStats = async () => {
+            totalImages.textContent = '-';
+            totalSize.textContent = '-';
+            fileTypesCount.textContent = '-';
+            typeList.innerHTML = '<div class="inline-loader">Loading...</div>';
+            popularList.innerHTML = '<div class="inline-loader">Loading...</div>';
+
+            try {
+                const [statsResponse, popularResponse] = await Promise.all([
+                    api('get', API_STATS_URL),
+                    api('get', `${API_POPULAR_URL}?limit=5`)
+                ]);
+
+                const stats = statsResponse.data;
+                const types = stats.types_count || [];
+
+                totalImages.textContent = stats.total_images ?? 0;
+                totalSize.textContent = formatFileSize(stats.total_size || 0);
+                fileTypesCount.textContent = types.length;
+                renderTypeList(types);
+                renderPopular(popularResponse.data || []);
+            } catch (e) {
+                console.error('[loadStats] Failed:', e);
+                typeList.innerHTML = `<p class="empty-panel-message error-text">Error loading stats: ${escapeHtml(e.message)}</p>`;
+                popularList.innerHTML = '';
+            }
+        };
+
+        loadStatsFunction = loadStats;
+    }
+
+    function initTrashTab() {
+        const trashGallery = $(SEL.trashGallery);
+        const trashSummary = $(SEL.trashSummary);
+        const purgeTrashBtn = $(SEL.purgeTrashBtn);
+        const prevPageBtn = $(SEL.trashPrevPageBtn);
+        const nextPageBtn = $(SEL.trashNextPageBtn);
+        const currentPageSpan = $(SEL.trashCurrentPageSpan);
+        const totalPagesSpan = $(SEL.trashTotalPagesSpan);
+
+        if (!trashGallery || !trashSummary || !purgeTrashBtn) {
+            console.error('[initTrashTab] Missing required elements');
+            return;
+        }
+
+        const updateTrashPaginationUI = () => {
+            if (currentPageSpan) currentPageSpan.textContent = trashState.currentPage;
+            if (totalPagesSpan) totalPagesSpan.textContent = trashState.totalPages || 1;
+            if (prevPageBtn) prevPageBtn.disabled = trashState.currentPage <= 1;
+            if (nextPageBtn) nextPageBtn.disabled = trashState.currentPage >= trashState.totalPages;
+            trashSummary.textContent = `${trashState.totalItems} image${trashState.totalItems === 1 ? '' : 's'} in trash.`;
+            purgeTrashBtn.disabled = trashState.totalItems === 0;
+        };
+
+        const restoreImage = async (filename) => {
+            try {
+                await api('post', API_RESTORE_URL(filename));
+                await loadTrash();
+                if (loadStatsFunction) loadStatsFunction();
+            } catch (e) {
+                await messageDialog({
+                    title: 'Restore Failed',
+                    message: e.message,
+                    confirmText: 'Close',
+                    variant: 'danger'
+                });
+            }
+        };
+
+        const createTrashCard = (image) => {
+            const filename = image.filename;
+            const originalName = image.original_name || filename;
+            const imageUrl = `${window.location.origin}/images/${filename}`;
+            const card = document.createElement('div');
+            card.className = 'image-card trash-card';
+            card.innerHTML = `
+                <div class="image-card-preview">
+                    <img src="${imageUrl}" alt="${escapeHtml(originalName)}" loading="lazy" />
+                </div>
+                <div class="image-card-info">
+                    <h3 class="image-card-title" title="${escapeHtml(filename)}">${escapeHtml(originalName)}</h3>
+                    <div class="image-card-meta">
+                        <span>${escapeHtml(formatFileSize(image.size || 0))}</span>
+                        <span>${escapeHtml((image.file_type || '').toUpperCase())}</span>
+                    </div>
+                    <p class="image-card-date">Deleted ${escapeHtml(formatDate(image.deleted_at))}</p>
+                    <div class="image-card-actions">
+                        <button class="restore-btn" type="button">
+                            <i class="fas fa-undo"></i>
+                            Restore
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            card.querySelector('.restore-btn').addEventListener('click', () => restoreImage(filename));
+            return card;
+        };
+
+        const loadTrash = async () => {
+            trashGallery.innerHTML = '<div class="loading-spinner-container"><div class="loading-spinner"><i class="fas fa-spinner fa-pulse fa-4x"></i></div></div>';
+
+            try {
+                const query = buildQueryString({
+                    page: trashState.currentPage,
+                    limit: trashState.limit
+                });
+                const response = await api('get', `${API_TRASH_URL}?${query}`);
+                const data = response.data;
+                const files = data.items || [];
+                const pagination = data.pagination || {};
+
+                trashState.totalItems = pagination.total || files.length;
+                trashState.totalPages = pagination.pages || 1;
+                trashGallery.innerHTML = '';
+
+                if (!files.length) {
+                    trashGallery.innerHTML = '<p class="no-images-msg">Trash is empty.</p>';
+                    updateTrashPaginationUI();
+                    return;
+                }
+
+                const fragment = document.createDocumentFragment();
+                files.forEach((file) => fragment.appendChild(createTrashCard(file)));
+                trashGallery.appendChild(fragment);
+                updateTrashPaginationUI();
+            } catch (e) {
+                console.error('[loadTrash] Failed:', e);
+                trashGallery.innerHTML = `<p class="no-images-msg error-text">Error loading trash: ${escapeHtml(e.message)}</p>`;
+            }
+        };
+
+        purgeTrashBtn.addEventListener('click', async () => {
+            const confirmed = await confirmDialog({
+                title: 'Purge Trash',
+                message: 'Permanently delete every image currently in trash? This cannot be undone.',
+                confirmText: 'Purge Trash',
+                variant: 'danger'
+            });
+
+            if (!confirmed) return;
+
+            try {
+                purgeTrashBtn.disabled = true;
+                await api('delete', API_TRASH_URL);
+                trashState.currentPage = 1;
+                await loadTrash();
+                if (loadStatsFunction) loadStatsFunction();
+            } catch (e) {
+                await messageDialog({
+                    title: 'Purge Failed',
+                    message: e.message,
+                    confirmText: 'Close',
+                    variant: 'danger'
+                });
+                purgeTrashBtn.disabled = false;
+            }
+        });
+
+        if (prevPageBtn) {
+            prevPageBtn.addEventListener('click', () => {
+                if (trashState.currentPage > 1) {
+                    trashState.currentPage--;
+                    loadTrash();
+                }
+            });
+        }
+
+        if (nextPageBtn) {
+            nextPageBtn.addEventListener('click', () => {
+                if (trashState.currentPage < trashState.totalPages) {
+                    trashState.currentPage++;
+                    loadTrash();
+                }
+            });
+        }
+
+        loadTrashFunction = loadTrash;
+    }
+
     // Initialize modules
     document.addEventListener('DOMContentLoaded', () => {
         console.log('[DOMContentLoaded] Starting module initialization');
 
+        loadSavedFilters();
         initTabs();
         initUploader();
         initImagesTab();
+        initStatsTab();
+        initTrashTab();
 
         console.log('[DOMContentLoaded] All modules initialized');
         console.log('[DOMContentLoaded] loadImagesFunction available:', !!loadImagesFunction);

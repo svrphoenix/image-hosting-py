@@ -30,6 +30,7 @@
         infoFileSize: '#infoFileSize',
         infoFileType: '#infoFileType',
         infoUploadDate: '#infoUploadDate',
+        infoViews: '#infoViews',
         infoId: '#infoId',
 
         // Action buttons
@@ -88,7 +89,7 @@
             console.error(`[API] ${method.toUpperCase()} error:`, e);
             const error = {
                 status: e.response?.status ?? null,
-                message: e.response?.data?.detail || e.message || 'Unknown error',
+                message: e.response?.data?.error || e.response?.data?.detail || e.message || 'Unknown error',
             };
             throw error;
         }
@@ -122,6 +123,68 @@
             console.error('[copyToClipboard] Failed to copy to clipboard:', e);
         }
     };
+
+    const escapeHtml = (value = '') => String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    const openDialog = ({
+        title,
+        message,
+        confirmText = 'OK',
+        cancelText = 'Cancel',
+        variant = 'primary',
+        showCancel = true
+    }) => new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'app-modal-backdrop';
+        modal.innerHTML = `
+            <div class="app-modal" role="dialog" aria-modal="true" aria-labelledby="appModalTitle">
+                <button class="app-modal-close" type="button" aria-label="Close dialog">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="app-modal-icon ${variant}">
+                    <i class="fas ${variant === 'danger' ? 'fa-triangle-exclamation' : 'fa-circle-info'}"></i>
+                </div>
+                <h2 class="app-modal-title" id="appModalTitle">${escapeHtml(title)}</h2>
+                <p class="app-modal-message">${escapeHtml(message)}</p>
+                <div class="app-modal-actions">
+                    ${showCancel ? `<button class="app-modal-btn secondary" type="button" data-action="cancel">${escapeHtml(cancelText)}</button>` : ''}
+                    <button class="app-modal-btn ${variant}" type="button" data-action="confirm">${escapeHtml(confirmText)}</button>
+                </div>
+            </div>
+        `;
+
+        const previousOverflow = document.body.style.overflow;
+        const close = (result) => {
+            document.body.style.overflow = previousOverflow;
+            modal.remove();
+            document.removeEventListener('keydown', onKeyDown);
+            resolve(result);
+        };
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') close(false);
+        };
+
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) close(false);
+            const action = event.target.closest('[data-action]')?.dataset.action;
+            if (action === 'confirm') close(true);
+            if (action === 'cancel') close(false);
+        });
+
+        modal.querySelector('.app-modal-close').addEventListener('click', () => close(false));
+        document.addEventListener('keydown', onKeyDown);
+        document.body.style.overflow = 'hidden';
+        document.body.appendChild(modal);
+        modal.querySelector('[data-action="confirm"]').focus();
+    });
+
+    const confirmDialog = (options) => openDialog({...options, showCancel: true});
+    const messageDialog = (options) => openDialog({...options, showCancel: false});
 
     /**
      * Format file size in human-readable format
@@ -223,6 +286,7 @@
         $(SEL.infoFileSize).textContent = imageData.size ? formatFileSize(imageData.size) : '-';
         $(SEL.infoFileType).textContent = imageData.file_type || '-';
         $(SEL.infoUploadDate).textContent = imageData.upload_time ? formatUploadDate(imageData.upload_time) : '-';
+        $(SEL.infoViews).textContent = imageData.views ?? 0;
         $(SEL.infoId).textContent = imageData.id ? `#${imageData.id}` : '-';
 
         $(SEL.directUrl).value = `${window.location.origin}${imageUrl}`;
@@ -267,9 +331,14 @@
             return;
         }
 
-        const confirmMessage = `Are you sure you want to delete "${currentImageData.original_name || currentFilename}"?\n\nThis action cannot be undone.`;
+        const confirmed = await confirmDialog({
+            title: 'Move to Trash',
+            message: `Move "${currentImageData.original_name || currentFilename}" to trash? You can restore it later from the Trash tab.`,
+            confirmText: 'Move to Trash',
+            variant: 'danger'
+        });
 
-        if (!confirm(confirmMessage)) {
+        if (!confirmed) {
             console.log('[handleDelete] Delete cancelled by user');
             return;
         }
@@ -295,7 +364,12 @@
             deleteBtn.disabled = false;
             deleteBtn.querySelector('span').textContent = 'Delete';
 
-            alert(`Delete failed: ${e.message}`);
+            await messageDialog({
+                title: 'Delete Failed',
+                message: e.message,
+                confirmText: 'Close',
+                variant: 'danger'
+            });
         }
     };
 

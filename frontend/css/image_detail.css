@@ -440,6 +440,103 @@ body {
     border-radius: 10px;
 }
 
+.app-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(11, 11, 11, 0.45);
+}
+
+.app-modal {
+    width: min(420px, 100%);
+    position: relative;
+    background: #FFFFFF;
+    border-radius: 8px;
+    border: 1px solid #E5EAFF;
+    box-shadow: 0 24px 80px rgba(11, 11, 11, 0.24);
+    padding: 28px;
+}
+
+.app-modal-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 6px;
+    background: #F2F5FF;
+    color: #4A5568;
+    cursor: pointer;
+}
+
+.app-modal-icon {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    color: #0060FF;
+    background: #E5EAFF;
+}
+
+.app-modal-icon.danger {
+    color: #B42318;
+    background: #FFE4E2;
+}
+
+.app-modal-title {
+    margin: 0 0 10px;
+    color: #0B0B0B;
+    font-size: 20px;
+}
+
+.app-modal-message {
+    margin: 0;
+    color: #4A5568;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.app-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 24px;
+}
+
+.app-modal-btn {
+    min-width: 96px;
+    height: 40px;
+    border: none;
+    border-radius: 7px;
+    padding: 0 16px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.app-modal-btn.primary {
+    background: #0060FF;
+    color: #FFFFFF;
+}
+
+.app-modal-btn.danger {
+    background: #D92D20;
+    color: #FFFFFF;
+}
+
+.app-modal-btn.secondary {
+    background: #E5EAFF;
+    color: #0B0B0B;
+}
+
 /* Utility Classes */
 .hidden {
     display: none !important;
@@ -523,5 +620,17 @@ body {
     .action-btn {
         padding: 10px 14px;
         font-size: 13px;
+    }
+
+    .app-modal {
+        padding: 22px;
+    }
+
+    .app-modal-actions {
+        flex-direction: column-reverse;
+    }
+
+    .app-modal-btn {
+        width: 100%;
     }
 }
