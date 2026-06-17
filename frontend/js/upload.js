@@ -343,11 +343,13 @@
      * @param {HTMLElement} el - Element to display message in.
      * @param {string} msg - Message to show.
      * @param {boolean} [isErr=false] - Whether it's an error message.
+     * @param {boolean} [isWarning=false] - Whether it's a warning message.
      */
-    const showStatus = (el, msg, isErr = false) => {
+    const showStatus = (el, msg, isErr = false, isWarning = false) => {
         console.log(`[showStatus] ${isErr ? 'ERROR' : 'INFO'}: ${msg}`);
         el.classList.toggle('upload-error', isErr);
-        el.classList.toggle('upload-main-text', !isErr);
+        el.classList.toggle('upload-warning', isWarning);
+        el.classList.toggle('upload-main-text', !isErr && !isWarning);
         el.textContent = msg;
     };
 
@@ -409,13 +411,16 @@
     }) => new Promise((resolve) => {
         const modal = document.createElement('div');
         modal.className = 'app-modal-backdrop';
+        const iconClass = variant === 'danger' ? 'fa-triangle-exclamation'
+            : variant === 'warning' ? 'fa-circle-exclamation'
+                : 'fa-circle-info';
         modal.innerHTML = `
             <div class="app-modal" role="dialog" aria-modal="true" aria-labelledby="appModalTitle">
                 <button class="app-modal-close" type="button" aria-label="Close dialog">
                     <i class="fas fa-times"></i>
                 </button>
                 <div class="app-modal-icon ${variant}">
-                    <i class="fas ${variant === 'danger' ? 'fa-triangle-exclamation' : 'fa-circle-info'}"></i>
+                    <i class="fas ${iconClass}"></i>
                 </div>
                 <h2 class="app-modal-title" id="appModalTitle">${escapeHtml(title)}</h2>
                 <p class="app-modal-message">${escapeHtml(message)}</p>
@@ -624,11 +629,38 @@
                     headers: {'Content-Type': 'multipart/form-data'},
                 });
                 console.log('[uploadFile] Upload successful:', data);
+                const imageUrl = `${window.location.origin}${data.url}`;
+                resultInput.value = imageUrl;
+
+                if (data.status === 'warning') {
+                    showStatus(uploadText, `Duplicate found: ${data.filename}`, false, true);
+                    const shouldOpenExisting = await confirmDialog({
+                        title: 'Duplicate Image',
+                        message: 'This file already exists. The existing direct link has been placed into the current upload field.',
+                        confirmText: 'View Existing',
+                        cancelText: 'Stay Here',
+                        variant: 'warning'
+                    });
+
+                    if (shouldOpenExisting) {
+                        window.location.href = `image_detail.html?filename=${encodeURIComponent(data.filename)}`;
+                    }
+                    return;
+                }
+
                 showStatus(uploadText, `File uploaded: ${data.filename}`);
-                resultInput.value = `${window.location.origin}${data.url}`;
+                if (loadImagesFunction && getSavedActiveTab() === 'images') {
+                    loadImagesFunction();
+                }
             } catch (e) {
                 console.error('[uploadFile] Upload failed:', e);
                 showStatus(uploadText, `Upload failed: ${e.message}`, true);
+                await messageDialog({
+                    title: 'Upload Failed',
+                    message: e.message,
+                    confirmText: 'Close',
+                    variant: 'danger'
+                });
             }
         };
 

@@ -64,21 +64,33 @@ class ImageRepository:
         where_str = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         return where_str, params
     
-    def create(self, filename: str, original_name: str, size: int, file_type: str) -> int:
+    def create(self, filename: str, original_name: str, size: int, file_type: str, file_hash: str) -> int:
         """
         Inserts a new image metadata record into the database and returns its unique ID.
         """
         with self._cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO images (filename, original_name, size, file_type)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO images (filename, original_name, size, file_type, file_hash)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING id;
                 """,
-                (filename, original_name, size, file_type),
+                (filename, original_name, size, file_type, file_hash),
             )
             image_id = cur.fetchone()[0]
             return image_id
+
+    def get_by_hash(self, file_hash: str) -> dict | None:
+        with self._cursor(dict_rows=True) as cur:
+            cur.execute(
+                """
+                SELECT id, filename, original_name, size, file_type, upload_time
+                FROM images
+                WHERE file_hash = %s
+                """,
+                (file_hash,),
+            )
+            return cur.fetchone()
 
     def get_total_count(self) -> int:
         """

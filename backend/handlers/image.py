@@ -1,3 +1,4 @@
+import hashlib
 import math
 import re
 import uuid
@@ -207,6 +208,21 @@ class ImageAPIServer(BaseHandler):
             self._send_error(413, f"File too large. Max: {settings.max_file_size_mb} MB")
             return
 
+        file_hash = hashlib.sha256(data).hexdigest()
+        existing_image = self.repo.get_by_hash(file_hash)
+        if existing_image:
+            logger.info(
+                f"Duplicate upload detected from IP {client_ip}. File already exists as {existing_image['filename']}.")
+
+            self._send_json(200, {
+                "status": "warning",
+                "message": "File already exists",
+                "id": existing_image["id"],
+                "filename": existing_image["filename"],
+                "url": f"/images/{existing_image['filename']}"
+            })
+            return
+
         ext = original_name.split(".")[-1].lower()
         filename = f"{uuid.uuid4()}.{ext}"
 
@@ -216,11 +232,13 @@ class ImageAPIServer(BaseHandler):
                 filename=filename,
                 original_name=original_name,
                 size=len(data),
-                file_type=ext
+                file_type=ext,
+                file_hash=file_hash
             )
             logger.info(f"Image {original_name} uploaded from IP {client_ip}.")
 
             self._send_json(201, {
+                "status": "success",
                 "id": image_id,
                 "filename": filename,
                 "url": f"/images/{filename}"}

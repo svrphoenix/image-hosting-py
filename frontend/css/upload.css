@@ -74,6 +74,13 @@ body {
     margin-bottom: 8px;
 }
 
+.upload-warning {
+    font-size: 14px;
+    color: #B54708;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
 .upload-sub-text {
     font-size: 14px;
     color: #ADC0F8;
@@ -711,6 +718,11 @@ body {
     background: #FFE4E2;
 }
 
+.app-modal-icon.warning {
+    color: #B54708;
+    background: #FEF0C7;
+}
+
 .app-modal-title {
     margin: 0 0 10px;
     color: #0B0B0B;
@@ -749,6 +761,11 @@ body {
 
 .app-modal-btn.danger {
     background: #D92D20;
+    color: #FFFFFF;
+}
+
+.app-modal-btn.warning {
+    background: #DC6803;
     color: #FFFFFF;
 }
 
