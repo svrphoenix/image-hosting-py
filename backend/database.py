@@ -48,7 +48,10 @@ class ImageRepository:
             where_clauses.append("original_name ILIKE %s")
             params.append(f"%{filters['search']}%")
 
-        if filters.get("file_type"):
+        if filters.get("file_type") == "jpg":
+            where_clauses.append("file_type IN (%s, %s)")
+            params.extend(["jpg", "jpeg"])
+        elif filters.get("file_type"):
             where_clauses.append("file_type = %s")
             params.append(filters["file_type"])
 
@@ -127,10 +130,19 @@ class ImageRepository:
         with self._cursor(dict_rows=True) as cur:
             cur.execute(
                 """
-                SELECT file_type, count(*)
+                SELECT
+                    CASE
+                        WHEN file_type IN ('jpg', 'jpeg') THEN 'jpg'
+                        ELSE file_type
+                    END AS file_type,
+                    count(*)
                 FROM images
                 WHERE deleted_at IS NULL
-                GROUP BY file_type;
+                GROUP BY
+                    CASE
+                        WHEN file_type IN ('jpg', 'jpeg') THEN 'jpg'
+                        ELSE file_type
+                    END;
                 """)
 
             return cur.fetchall()
