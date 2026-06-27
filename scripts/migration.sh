@@ -5,9 +5,13 @@
 # to the 'postgres' Docker container. It keeps track of applied migrations
 # in a 'migration_history' table within the database.
 
-ENV_FILE=".env"
-MIGRATIONS_DIR="./db/migrations"
-CONTAINER_NAME="postgres" # Name of the PostgreSQL service container
+set -euo pipefail
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENV_FILE="${PROJECT_ROOT}/.env"
+MIGRATIONS_DIR="${PROJECT_ROOT}/db/migrations"
 
 # Check if .env file exists
 if [ ! -f "$ENV_FILE" ]; then
@@ -18,10 +22,11 @@ fi
 # Function to get environment variables from the .env file
 get_env_var() {
     local var_name=$1
-    grep -E "^${var_name}=" "$ENV_FILE" | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+grep -E "^[[:space:]]*${var_name}=" "${ENV_FILE}" | cut -d'=' -f2- | tr -d "'\"\r "
 }
 
 # Get database user and name from .env
+CONTAINER_NAME=$(get_env_var "DB_CONTAINER_NAME")
 DB_USER=$(get_env_var "DB_USER")
 [ -z "$DB_USER" ] && DB_USER=$(get_env_var "POSTGRES_USER")
 
@@ -48,22 +53,21 @@ fi
 
 echo "Checking migration history table..."
 # Create migration_history table if it doesn't exist
-docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" -c "
+if ! docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" -c "
 CREATE TABLE IF NOT EXISTS migration_history (
     id SERIAL PRIMARY KEY,
     migration_name TEXT UNIQUE NOT NULL,
     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);" > /dev/null
-
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to connect to the database or create the history table."
+);" > /dev/null; 
+then
+    echo "Error: Failed to connect to the database or create the history table." >&2
     exit 1
 fi
 
 success_count=0
 
 # Iterate through SQL migration files in sorted order
-for file in $(ls "$MIGRATIONS_DIR"/*.sql 2>/dev/null | sort); do
+for file in "$MIGRATIONS_DIR"/*.sql; do
     [ -e "$file" ] || continue # Skip if file does not exist (e.g., if glob returns nothing)
 
     filename=$(basename "$file")
@@ -77,16 +81,14 @@ for file in $(ls "$MIGRATIONS_DIR"/*.sql 2>/dev/null | sort); do
     else
         echo "Applying migration: $filename ..."
         # Apply migration and record it in migration_history
-        (cat "$file"; echo "INSERT INTO migration_history (migration_name) VALUES ('$filename');") | \
-        docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" --set ON_ERROR_STOP=1 > /dev/null
-
-        if [ $? -eq 0 ]; then
-            echo "Success: $filename"
-            ((success_count++))
-        else
-            echo "ERROR: Failed to apply $filename. Stopping execution!"
-            exit 1
+        if ! (cat "$file"; echo "INSERT INTO migration_history (migration_name) VALUES ('$filename');") | \
+                docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" --set ON_ERROR_STOP=1 > /dev/null; then
+                echo "ERROR: Failed to apply $filename. Stopping execution!" >&2
+                exit 1
         fi
+
+        echo "Success: $filename"
+        ((success_count++))
     fi
 done
 

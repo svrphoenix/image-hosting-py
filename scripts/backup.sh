@@ -9,7 +9,9 @@ set -euo pipefail
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$(cd "${SCRIPT_DIR}/.." && pwd)/.env"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENV_FILE="${PROJECT_ROOT}/.env"
+BACKUP_DIR="${PROJECT_ROOT}/backups"
 
 if [ ! -f "${ENV_FILE}" ]; then
     echo "ERR: File .env not found at: ${ENV_FILE}"
@@ -19,14 +21,13 @@ fi
 # Function to get environment variables from the .env file
 get_env_var() {
     local var_name="$1"
-    grep "^${var_name}=" "${ENV_FILE}" | cut -d'=' -f2- | tr -d "'\""
+    grep "^${var_name}=" "${ENV_FILE}" | cut -d'=' -f2- | tr -d "'\"\r"
 }
 
 # Database credentials and backup settings
 DB_USER=$(get_env_var "DB_USER")
 DB_NAME=$(get_env_var "DB_NAME")
-BACKUP_DIR="./backups"
-CONTAINER_NAME="postgres" # Name of the PostgreSQL service container
+CONTAINER_NAME=$(get_env_var "DB_CONTAINER_NAME")
 RETENTION_DAYS=14 # Number of days to retain backup files
 
 # Create backup directory if it doesn't exist

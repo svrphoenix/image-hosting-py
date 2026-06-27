@@ -1,4 +1,18 @@
 services:
+  frontend:
+    build:
+      context: frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+      - ./images:/app/public/images
+    command: npm run dev
+
   backend:
     build:
       context: backend
