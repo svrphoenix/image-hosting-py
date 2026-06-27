@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Image Hosting</title>
+  <link rel="icon" type="image/x-icon" href="assets/ico/fav.png">
+  <link rel="stylesheet" href="css/upload.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="js/upload.js" defer></script>
+  <script src="js/tabs.js" defer></script>
+</head>
+<body>
+<div class="page-container">
+
+  <header class="header-container">
+    <h1 class="header-title">Upload Photos</h1>
+    <p class="header-subtitle">Upload selfies, memes, or any fun pictures here.</p>
+  </header>
+
+  <nav class="tabs">
+    <span class="tab active" data-tab="upload">Upload</span>
+    <span class="tab inactive" data-tab="images">Images</span>
+    <span class="tab inactive" data-tab="stats">Stats</span>
+    <span class="tab inactive" data-tab="trash">Trash</span>
+  </nav>
+
+  <!-- Upload Section -->
+  <section class="upload-section tab-content" id="upload-tab">
+    <div class="drop-area" id="dropArea">
+      <div class="upload-icon">
+        <i class="fas fa-cloud-upload-alt fa-3x"></i>
+      </div>
+      <div class="upload-text">
+        <p class="upload-main-text">Select a file or drag and drop here</p>
+        <p class="upload-sub-text">Only support .jpg, .png and .gif. Maximum file size is 5MB</p>
+      </div>
+    </div>
+
+    <div class="upload-button">
+      <button id="uploadBtn">Browse your file</button>
+      <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.gif" hidden/>
+    </div>
+
+    <section class="upload-result">
+      <p class="result-title">Current Upload</p>
+      <div class="result-box">
+        <input type="text" id="resultLink" placeholder="https://" readonly/>
+        <button class="copy-btn" id="copyBtn">COPY</button>
+      </div>
+    </section>
+  </section>
+
+  <!-- Images Section -->
+  <section class="images-section tab-content hidden" id="images-tab">
+    <!-- Controls Header -->
+    <div class="gallery-controls">
+      <div class="sort-controls">
+        <select id="sortSelect">
+          <option value="desc" selected>Newest First</option>
+          <option value="asc">Oldest First</option>
+        </select>
+      </div>
+      <div class="filter-controls">
+        <input type="search" id="searchInput" placeholder="Search by name"/>
+        <select id="typeSelect">
+          <option value="">All types</option>
+          <option value="jpg">JPG / JPEG</option>
+          <option value="png">PNG</option>
+          <option value="gif">GIF</option>
+        </select>
+        <input type="date" id="dateFromInput" aria-label="Uploaded from"/>
+        <input type="date" id="dateToInput" aria-label="Uploaded to"/>
+        <button class="secondary-action-btn" id="clearFiltersBtn" type="button">Clear</button>
+      </div>
+      <div class="limit-controls">
+        <div class="limit-select">
+          <select id="limitSelect">
+            <option value="4">4</option>
+            <option value="8" selected>8</option>
+            <option value="12">12</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="image-gallery">
+    </div>
+
+    <!-- Gallery Divider -->
+    <div class="gallery-divider">
+      <div class="divider-line"></div>
+      <div class="divider-content">
+        <i class="fas fa-images"></i>
+      </div>
+      <div class="divider-line"></div>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="pagination-controls">
+      <button class="pagination-btn" id="prevPage" disabled>
+        <i class="fas fa-chevron-left"></i> Previous
+      </button>
+      <div class="pagination-info">
+        Page <span id="currentPage">1</span> of <span id="totalPages">1</span>
+      </div>
+      <button class="pagination-btn" id="nextPage" disabled>
+        Next <i class="fas fa-chevron-right"></i>
+      </button>
+    </div>
+  </section>
+
+  <!-- Stats Section -->
+  <section class="stats-section tab-content hidden" id="stats-tab">
+    <div class="dashboard-grid" id="statsCards">
+      <div class="metric-card">
+        <span class="metric-label">Active Images</span>
+        <strong class="metric-value" id="totalImages">-</strong>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Storage Used</span>
+        <strong class="metric-value" id="totalSize">-</strong>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">File Types</span>
+        <strong class="metric-value" id="fileTypesCount">-</strong>
+      </div>
+    </div>
+
+    <div class="stats-layout">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Type Distribution</h2>
+        </div>
+        <div class="type-list" id="typeList"></div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Popular Images</h2>
+        </div>
+        <div class="popular-list" id="popularList"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- Trash Section -->
+  <section class="trash-section tab-content hidden" id="trash-tab">
+    <div class="trash-header">
+      <p class="trash-summary" id="trashSummary">Deleted images are stored here before permanent purge.</p>
+      <button class="danger-action-btn" id="purgeTrashBtn" type="button">
+        <i class="fas fa-trash"></i>
+        Purge Trash
+      </button>
+    </div>
+
+    <div class="image-gallery trash-gallery" id="trashGallery"></div>
+
+    <div class="pagination-controls">
+      <button class="pagination-btn" id="trashPrevPage" disabled>
+        <i class="fas fa-chevron-left"></i> Previous
+      </button>
+      <div class="pagination-info">
+        Page <span id="trashCurrentPage">1</span> of <span id="trashTotalPages">1</span>
+      </div>
+      <button class="pagination-btn" id="trashNextPage" disabled>
+        Next <i class="fas fa-chevron-right"></i>
+      </button>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
