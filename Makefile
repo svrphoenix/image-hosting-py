@@ -1,11 +1,11 @@
-# Запуск для розробки
+# Run for development
 dev:
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
-# Запуск для проду (10 контейнерів бекенду з балансуванням)
+# Run for production
 prod:
 	docker compose -f docker-compose.yml up --scale backend=10 -d --build
 
-# Зупинити все
+# Stop everything
 down:
-	docker-compose down
+	docker compose down

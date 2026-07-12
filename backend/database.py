@@ -89,7 +89,7 @@ class ImageRepository:
                 """
                 SELECT id, filename, original_name, size, file_type, upload_time
                 FROM images
-                WHERE file_hash = %s
+                WHERE file_hash = %s AND deleted_at IS NULL
                 """,
                 (file_hash,),
             )
@@ -229,31 +229,6 @@ class ImageRepository:
                 (filename,),
             )
             return cur.fetchone()
-
-    # def delete_by_id(self, image_id: int) -> bool:
-    #     """
-    #     Deletes an image metadata record using its unique ID. Returns True if successful.
-    #     """
-    #     with self._cursor(dict_rows=True) as cur:
-    #         cur.execute(
-    #             """
-    #             DELETE
-    #             FROM images
-    #             WHERE id = %s AND deleted_at IS NULL
-    #             RETURNING id;""", (image_id,),
-    #         )
-    #         return cur.fetchone() is not None
-    #
-    # def delete_by_filename(self, filename: str) -> bool:
-    #     """
-    #     Deletes an image metadata record using its unique filename. Returns True if successful.
-    #     """
-    #     with self._cursor() as cur:
-    #         cur.execute(
-    #             "DELETE FROM images WHERE filename = %s RETURNING id;",
-    #             (filename,),
-    #         )
-    #         return cur.fetchone() is not None
 
     def image_stats(self, filename: str) -> dict | None:
         """

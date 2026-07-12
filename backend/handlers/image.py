@@ -4,7 +4,7 @@ import re
 import uuid
 from urllib.parse import urlparse
 
-import cgi
+import cgi  # provided by `legacy-cgi` package (stdlib cgi removed in Python 3.13)
 from PIL import Image, UnidentifiedImageError
 
 from config import settings
